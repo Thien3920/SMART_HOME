@@ -10,10 +10,11 @@ LiquidCrystal_I2C lcd(0X27,16,2);
 
 /* Define */
 #define DHTTYPE DHT11
-#define DHTPIN 48
-#define LED1   49
-#define LED2   50
-#define BUZZER 51
+#define DHTPIN 41
+#define LED1   45
+#define LED2   47
+#define PIR    33
+#define BUZZER 43
 
 /* DHT11 */
 DHT dht(DHTPIN, DHTTYPE);
@@ -251,15 +252,25 @@ void vTaskWarning(void *pvParameters)
    
 
   for(;;)
-  {  
-    int value = analogRead(A0);   //đọc giá trị điện áp ở chân A0 - chân cảm biến (value luôn nằm trong khoảng 0-1023)
-    int per = map(value,0,1023,0,100);
+  { int Content = 1;
+    int GasValue = analogRead(A0);   //đọc giá trị điện áp ở chân A0 - chân cảm biến (value luôn nằm trong khoảng 0-1023)
+    int Value = digitalRead(PIR);
+    int per = map(GasValue,0,1023,0,100);
 //    Serial.println("---Modle sim---");
-    if (per >20)
+//    Serial.print("per");
+//    Serial.print(per);
+    if (per >50 || Value ==1 ) //20
     { 
       digitalWrite(BUZZER, HIGH);
+  
+      if (per >50)
+      {
+      Content = 1;
+      }
+      else{
+        Content = 2;
+      }
       
-      int Content = 1;
         
       callNumber();
       SendMessage(Content); 
