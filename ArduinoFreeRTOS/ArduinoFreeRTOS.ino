@@ -1,22 +1,14 @@
-/* SMART HOME USING FreeRTOS 
-GROUP: TRAN  CHI CUONG
-Members: LE VAN THIEN
-         DAO DUY NGU
-         TRAN CHI CUONG
-         HO THANH LONG
-         NGUYEN VU HOAI DUY
-*/
-
-
-/*--------------- include library--------------*/
-
-
-#include <LiquidCrystal_I2C.h>
-LiquidCrystal_I2C lcd(0X27,16,2); 
+/* FreeRTOS.org includes. */
 #include "Arduino_FreeRTOS.h"
 #include "queue.h"
 #include "DHT.h"
-/*--------------- Define Pin--------------*/
+
+#include <LiquidCrystal_I2C.h>
+LiquidCrystal_I2C lcd(0X27,16,2); 
+
+
+
+/* Define */
 #define DHTTYPE DHT11
 #define DHTPIN 41
 #define LED1   45
@@ -24,43 +16,44 @@ LiquidCrystal_I2C lcd(0X27,16,2);
 #define PIR    33
 #define BUZZER 43
 
-/*--------------- DHT-11 --------------*/
+/* DHT11 */
 DHT dht(DHTPIN, DHTTYPE);
 
-
-/*--------------- Define variable --------------*/
-volatile int check_person = 0;
-float Hum = 0;                  
+float Hum = 0;
 float Temp = 0;
+volatile int check_person = 0;
 
+/*  Task control */
 String StateLed1 = "0";
 String StateLed2 = "0";
 
-/*--------------- Setup phone number --------------*/
+/* Module Sim */
+int _timeout;
+String _buffer;
 String number = "0978879560"; 
 
-/*--------------- declare vTask function --------------*/
-void vTaskReceiveFromESP8266(void *pvParameters);
-void vTaskSendToESP8266(void *pvParameters);
-void vTaskControl(void *pvParameters);
-void vTaskWarning(void *pvParameters);
+/* The task function. */
+void vTaskControl( void *pvParameters );
 void vTaskDHT( void *pvParameters );
 void vTaskLCD(void *pvParameters);
 
 
-/*--------------- Handle--------------*/
+
+/* Handle */
+TaskHandle_t HandleDHT;
+TaskHandle_t HandleLCD;
 TaskHandle_t HandleReceiveFromESP8266;
 TaskHandle_t HandleSendToESP8266;
 TaskHandle_t HandleControl;
 TaskHandle_t HandleWarning;
-TaskHandle_t HandleDHT;
-TaskHandle_t HandleLCD;
 
-/*--------------- Queue--------------*/
+
+/* Queue */
 QueueHandle_t xQueueControl;
 QueueHandle_t xQueueDHT;
 
-/*---------------Struct--------------*/
+
+
 typedef struct{
   int  Led1;
   int  Led2;
@@ -74,12 +67,13 @@ typedef struct{
 
 
 void setup() {
-  //Begin serial communication with Arduino and SIM800L
+
+   /* join i2c bus with address 8 */
   Serial.begin(9600);
   Serial1.begin(9600);
   dht.begin();
   /* Module Sim */
-
+  _buffer.reserve(50);
   /* Signal Pin */
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
@@ -115,7 +109,7 @@ void setup() {
     xTaskCreate( vTaskLCD, "Task LCD", 500, NULL, 1,&HandleLCD );
   }
 
-xTaskCreate( vTaskWarning, "vTaskWarning", 300, NULL, 5,&HandleWarning);   
+xTaskCreate( vTaskWarning, "vTaskWarning", 400, NULL, 5,&HandleWarning);   
   /* Start the scheduler so our tasks start executing. */
   vTaskStartScheduler();
 }
@@ -233,6 +227,7 @@ void vTaskControl(void *pvParameters)
   
   for(;;)
   {
+//    Serial.println("---Control---");
     xStatus = xQueueReceive( xQueueControl, &queue_control,xTicksToWait );
     if(xStatus == pdPASS){
       
@@ -257,22 +252,25 @@ void vTaskWarning(void *pvParameters)
 
   for(;;)
   { 
-    int x = 1;
+    
+    int  x = 1;
     int GasValue = analogRead(A0);   //đọc giá trị điện áp ở chân A0 - chân cảm biến (value luôn nằm trong khoảng 0-1023)
     int per = map(GasValue,0,1023,0,100);
     if (check_person == 1)
         x = 2;
     if (per > 20 || check_person == 1) //20
     { 
-      ;
-      digitalWrite(BUZZER, HIGH);       
-
-    CallNumber();
-    delay(5000);
-      SendMessage(x);
       
-      digitalWrite(BUZZER, LOW);
+      digitalWrite(BUZZER, HIGH);       
+      CallNumber();
+      
+      delay(1000);
+      SendMessage(x);
+      delay(5000);
+      attachInterrupt(digitalPinToInterrupt(3), turn_on_buzzer, RISING);
       check_person = 0;
+      digitalWrite(BUZZER, LOW);
+      
       break;
     }
     vTaskDelay(1000/portTICK_PERIOD_MS );
@@ -283,47 +281,52 @@ void turn_on_buzzer()
 {
   digitalWrite(BUZZER, HIGH);
   check_person = 1;
+  detachInterrupt(digitalPinToInterrupt(3));
 }
 
 
 
 ///* functions for module sim 800l */
+void SendMessage(int x)
+{
+  String message = "";
+  if (x ==1)
+  {
+    message = "Co Khi De Chay";
+  }
+  else
+  {
+    message = "Co Trom Dot Nhap";
+  }
+  Serial.println("AT"); //Once the handshake test is successful, it will back to OK
+  updateSerial();
+
+  Serial.println("AT+CMGF=1"); // Configuring TEXT mode
+  updateSerial();
+  Serial.println("AT+CMGS=\"" + number + "\"\r"); //Mobile phone number to send message
+  updateSerial();
+  Serial.println(message); //text content
+  updateSerial();
+  Serial.write(26);
+}
+
 void CallNumber(void)
 {
   Serial.println("AT"); //Once the handshake test is successful, i t will back to OK
   updateSerial();
 
-  
-  Serial.print(F("ATD"));
-  Serial.print(number);
-  Serial.print(F(";\r\n"));
-  updateSerial();
+//  
+//  Serial.print(F("ATD"));
+//  Serial.print(number);
+//  Serial.print(F(";\r\n"));
+  Serial.print("ATD0978879560;\r\n");
+
+  delay(10000); 
+  Serial.println("ATH"); //hang up
+//  
 
 }
-void SendMessage(int x)
-{
-  String Content;
-  if (x == 1)
-  {
-    Content =" Co Khi De Chay!";
-  }
-  else
-  {
-    Content = "Co Trom Dot Nhap!";
-  }
-  
-   Serial.println("AT"); //Once the handshake test is successful, it will back to OK
-  updateSerial();
 
-  Serial.println("AT+CMGF=1"); // Configuring TEXT mode
-  updateSerial();
-
-  Serial.println("AT+CMGS=\"" + number + "\"\r");
-  updateSerial();
-  Serial.print(Content); 
-  updateSerial();
-  Serial.write(26);
-}
 void updateSerial()
 {
   delay(500);
@@ -333,7 +336,6 @@ void updateSerial()
     Serial.write(Serial.read());//Forward what Software Serial received to Serial Port
   }
 }
-
 
  
 void loop()
