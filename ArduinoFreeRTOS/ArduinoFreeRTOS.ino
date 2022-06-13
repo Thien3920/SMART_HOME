@@ -2,8 +2,9 @@
 #include "Arduino_FreeRTOS.h"
 #include "queue.h"
 #include "DHT.h"
-
+#include "semphr.h"
 #include <LiquidCrystal_I2C.h>
+
 LiquidCrystal_I2C lcd(0X27,16,2); 
 
 
@@ -33,10 +34,16 @@ String _buffer;
 String number = "0978879560"; 
 
 /* The task function. */
-void vTaskControl( void *pvParameters );
-void vTaskDHT( void *pvParameters );
-void vTaskLCD(void *pvParameters);
-
+static void vTaskControl( void *pvParameters );
+static void vTaskDHT( void *pvParameters );
+static void vTaskLCD(void *pvParameters);
+static void vPIRInterruptHandler( void );
+static void vMQ2InterruptHandler( void );
+static void vTaskReceiveFromESP8266(void *pvParameters);
+static void vTaskSendToESP8266(void *pvParameters);
+static void SendMessage(int);
+static void CallNumber(void);
+static void updateSerial(void);
 
 
 /* Handle */
@@ -51,7 +58,10 @@ TaskHandle_t HandleWarning;
 /* Queue */
 QueueHandle_t xQueueControl;
 QueueHandle_t xQueueDHT;
+QueueHandle_t xIntegerQueue;
 
+/* semaphore */
+SemaphoreHandle_t xCountingSemaphore;
 
 
 typedef struct{
@@ -73,11 +83,11 @@ void setup() {
   Serial1.begin(9600);
   dht.begin();
   /* Module Sim */
-  _buffer.reserve(50);
   /* Signal Pin */
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(BUZZER, OUTPUT);
+  Serial.print("ATE0\r\n");
 
   /* LCD */
   lcd.init();                    
@@ -87,16 +97,24 @@ void setup() {
 
 
   /* FreeRTOS */
-  xQueueControl = xQueueCreate( 10, sizeof( StructControl) );
+  xCountingSemaphore = xSemaphoreCreateCounting(5, 0);
+  
+  xIntegerQueue = xQueueCreate( 5, sizeof( unsigned int));
+  xQueueControl = xQueueCreate( 10, sizeof( StructControl));
   xQueueDHT     = xQueueCreate( 10, sizeof( StructDHT));
   // config interrupt
-   pinMode(3, INPUT);
-   attachInterrupt(digitalPinToInterrupt(3), turn_on_buzzer, RISING);
+  pinMode(2, INPUT);
+  pinMode(3, INPUT);
+  attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
+  attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
    
+  if( xCountingSemaphore != NULL )
+  {
+    xTaskCreate( vTaskWarning, "vTaskWarning", 400, NULL, 5,&HandleWarning);  
+  }
+  
+  xTaskCreate( vTaskSendToESP8266, "vTaskSendToESP8266", 300, NULL, 4,&HandleSendToESP8266); 
    
-   xTaskCreate( vTaskSendToESP8266, "vTaskSendToESP8266", 300, NULL, 4,&HandleSendToESP8266); 
-   
-
   if ( xQueueControl != NULL)
   {
     xTaskCreate( vTaskReceiveFromESP8266, "vTaskReceiveFromESP8266", 500, NULL , 3,&HandleReceiveFromESP8266);
@@ -109,13 +127,14 @@ void setup() {
     xTaskCreate( vTaskLCD, "Task LCD", 500, NULL, 1,&HandleLCD );
   }
 
-xTaskCreate( vTaskWarning, "vTaskWarning", 400, NULL, 5,&HandleWarning);   
+  
   /* Start the scheduler so our tasks start executing. */
   vTaskStartScheduler();
+  for(;;);
 }
 
 
-void vTaskDHT(void *pvParameters)
+static void vTaskDHT(void *pvParameters)
 {
 
   long SendTemp;
@@ -147,16 +166,16 @@ void vTaskDHT(void *pvParameters)
   }
 }
 
-void vTaskLCD(void *pvParameters)
+static void vTaskLCD(void *pvParameters)
 {
   
   StructDHT ReceiveDHT;
   
-  const TickType_t xTicksToWait = 100 / portTICK_PERIOD_MS;
+  const TickType_t xTicksToWait = 100/portTICK_PERIOD_MS;
   for(;;)
   {
 //    Serial.println("---LCD---");  
-    xQueueReceive( xQueueDHT, &ReceiveDHT, xTicksToWait );
+    xQueueReceive(xQueueDHT, &ReceiveDHT, xTicksToWait);
     
     
     lcd.clear();
@@ -174,7 +193,7 @@ void vTaskLCD(void *pvParameters)
   }
 }
 
-void vTaskReceiveFromESP8266(void *pvParameters)
+static void vTaskReceiveFromESP8266(void *pvParameters)
 { const TickType_t xTicksToWait = 100 / portTICK_PERIOD_MS;
   BaseType_t xStatus;
   for(;;)
@@ -191,7 +210,7 @@ void vTaskReceiveFromESP8266(void *pvParameters)
     DataToSend.Led1 = StateLed1.toInt();
     DataToSend.Led2 = StateLed2.toInt();
     
-    xQueueSendToFront( xQueueControl,&DataToSend, xTicksToWait );
+    xQueueSendToFront( xQueueControl,&DataToSend, xTicksToWait);
 
     }
     vTaskDelay(500/portTICK_PERIOD_MS );
@@ -199,7 +218,7 @@ void vTaskReceiveFromESP8266(void *pvParameters)
   }
 }
 
-void vTaskSendToESP8266(void *pvParameters)
+static void vTaskSendToESP8266(void *pvParameters)
 {
   StructDHT DHTValue;
   String DataSend;
@@ -220,7 +239,7 @@ void vTaskSendToESP8266(void *pvParameters)
   }
 }
 
-void vTaskControl(void *pvParameters)
+static void vTaskControl(void *pvParameters)
 { BaseType_t xStatus;
   const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
   StructControl queue_control;
@@ -245,58 +264,84 @@ void vTaskControl(void *pvParameters)
 }
 
 
-void vTaskWarning(void *pvParameters)
+static void vTaskWarning(void *pvParameters)
 { 
- 
-   
-
+  BaseType_t xStatus;
+  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
   for(;;)
   { 
-    
-    int  x = 1;
-    int GasValue = analogRead(A0);   //đọc giá trị điện áp ở chân A0 - chân cảm biến (value luôn nằm trong khoảng 0-1023)
-    int per = map(GasValue,0,1023,0,100);
-    if (check_person == 1)
-        x = 2;
-    if (per > 20 || check_person == 1) //20
-    { 
-      
-      digitalWrite(BUZZER, HIGH);       
-      CallNumber();
-      
-      delay(1000);
-      SendMessage(x);
-      delay(5000);
-      attachInterrupt(digitalPinToInterrupt(3), turn_on_buzzer, RISING);
-      check_person = 0;
-      digitalWrite(BUZZER, LOW);
-      
-      break;
+    int state = 0;
+    String Content;
+    for(;;)
+    {
+      state = 0;
+      xSemaphoreTake(xCountingSemaphore, portMAX_DELAY );
+      xStatus = xQueueReceive(xIntegerQueue, &state, xTicksToWait);
+      if (xStatus == pdPASS)
+      {
+        digitalWrite(BUZZER, HIGH); 
+        CallNumber();
+        SendMessage(state);
+  
+        //delay(2000);
+        digitalWrite(BUZZER, LOW);
+        if (state == 1)
+        {
+          attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
+        }
+        if (state == 2)
+        {
+          attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
+        }
+       }
     }
-    vTaskDelay(1000/portTICK_PERIOD_MS );
   }
 }
 
-void turn_on_buzzer()
+static void vPIRInterruptHandler( void )
 {
-  digitalWrite(BUZZER, HIGH);
-  check_person = 1;
   detachInterrupt(digitalPinToInterrupt(3));
+  volatile int state2 = 1;
+  static BaseType_t xHigherPriorityTaskWoken;
+  xHigherPriorityTaskWoken = pdFALSE;
+  xSemaphoreGiveFromISR(xCountingSemaphore, (BaseType_t*)&xHigherPriorityTaskWoken);
+  xQueueSendToBackFromISR(xIntegerQueue, &state2, (BaseType_t*)&xHigherPriorityTaskWoken);
+  if( xHigherPriorityTaskWoken == pdTRUE )
+  {
+
+    vPortYield();
+  }
+}
+
+static void vMQ2InterruptHandler( void )
+{
+  detachInterrupt(digitalPinToInterrupt(2));
+  volatile int state1 = 2;
+  static BaseType_t xHigherPriorityTaskWoken;
+
+  xHigherPriorityTaskWoken = pdFALSE;
+
+  xSemaphoreGiveFromISR( xCountingSemaphore, (BaseType_t*)&xHigherPriorityTaskWoken );
+  xQueueSendToBackFromISR( xIntegerQueue, &state1, (BaseType_t*)&xHigherPriorityTaskWoken);
+  if( xHigherPriorityTaskWoken == pdTRUE )
+  {
+    vPortYield();
+  }
 }
 
 
 
 ///* functions for module sim 800l */
-void SendMessage(int x)
+static void SendMessage(int x)
 {
   String message = "";
-  if (x ==1)
+  if (x == 1)
   {
-    message = "Co Khi De Chay";
+    message = "Co Trom Dot Nhap!";
   }
-  else
+  if (x == 2)
   {
-    message = "Co Trom Dot Nhap";
+    message = "Co khi de chay!";
   }
   Serial.println("AT"); //Once the handshake test is successful, it will back to OK
   updateSerial();
@@ -310,24 +355,18 @@ void SendMessage(int x)
   Serial.write(26);
 }
 
-void CallNumber(void)
+static void CallNumber(void)
 {
   Serial.println("AT"); //Once the handshake test is successful, i t will back to OK
   updateSerial();
-
-//  
-//  Serial.print(F("ATD"));
-//  Serial.print(number);
-//  Serial.print(F(";\r\n"));
   Serial.print("ATD0978879560;\r\n");
-
   delay(10000); 
   Serial.println("ATH"); //hang up
-//  
+
 
 }
 
-void updateSerial()
+static void updateSerial(void)
 {
   delay(500);
 
