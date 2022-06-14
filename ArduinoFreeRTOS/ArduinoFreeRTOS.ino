@@ -166,6 +166,28 @@ static void vTaskDHT(void *pvParameters)
   }
 }
 
+static void vTaskSendToESP8266(void *pvParameters)
+{
+  StructDHT DHTValue;
+  String DataSend;
+  
+  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
+  for(;;)
+  {
+    
+    DataSend = "";
+    xQueuePeek( xQueueDHT, &DHTValue, xTicksToWait );
+ 
+  
+    
+    DataSend = DataSend + DHTValue.Hum+":"+DHTValue.Temp;
+    Serial1.println(DataSend);
+
+    vTaskDelay(500/portTICK_PERIOD_MS );
+    taskYIELD();
+  }
+}
+
 static void vTaskLCD(void *pvParameters)
 {
   
@@ -190,8 +212,10 @@ static void vTaskLCD(void *pvParameters)
     lcd.print("C");
 
     vTaskDelay(500/portTICK_PERIOD_MS );
+    taskYIELD();
   }
 }
+
 
 static void vTaskReceiveFromESP8266(void *pvParameters)
 { const TickType_t xTicksToWait = 100 / portTICK_PERIOD_MS;
@@ -210,34 +234,15 @@ static void vTaskReceiveFromESP8266(void *pvParameters)
     DataToSend.Led1 = StateLed1.toInt();
     DataToSend.Led2 = StateLed2.toInt();
     
-    xQueueSendToFront( xQueueControl,&DataToSend, xTicksToWait);
+    xQueueSendToBack( xQueueControl,&DataToSend, xTicksToWait);
 
     }
-    vTaskDelay(500/portTICK_PERIOD_MS );
+    vTaskDelay(300/portTICK_PERIOD_MS );
     taskYIELD();
   }
 }
 
-static void vTaskSendToESP8266(void *pvParameters)
-{
-  StructDHT DHTValue;
-  String DataSend;
-  
-  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-  for(;;)
-  {
-    
-    DataSend = "";
-    xQueuePeek( xQueueDHT, &DHTValue, xTicksToWait );
- 
-  
-    
-    DataSend = DataSend + DHTValue.Hum+":"+DHTValue.Temp;
-    Serial1.println(DataSend);
 
-    vTaskDelay(300/portTICK_PERIOD_MS );
-  }
-}
 
 static void vTaskControl(void *pvParameters)
 { BaseType_t xStatus;
@@ -260,6 +265,7 @@ static void vTaskControl(void *pvParameters)
       }
     
     vTaskDelay(300/portTICK_PERIOD_MS );
+    taskYIELD();
   }
 }
 
