@@ -113,7 +113,7 @@ void setup() {
     xTaskCreate( vTaskWarning, "vTaskWarning", 400, NULL, 5,&HandleWarning);  
   }
   
-  xTaskCreate( vTaskSendToESP8266, "vTaskSendToESP8266", 300, NULL, 4,&HandleSendToESP8266); 
+  xTaskCreate( vTaskSendToESP8266, "vTaskSendToESP8266", 300, NULL, 3,&HandleSendToESP8266); 
    
   if ( xQueueControl != NULL)
   {
@@ -123,8 +123,8 @@ void setup() {
   
   if( xQueueDHT  != NULL )
   {
-    xTaskCreate( vTaskDHT, "Task DHT",500, NULL, 2,&HandleDHT );
-    xTaskCreate( vTaskLCD, "Task LCD", 500, NULL, 1,&HandleLCD );
+    xTaskCreate( vTaskDHT, "Task DHT",500, NULL, 1,&HandleDHT );
+    xTaskCreate( vTaskLCD, "Task LCD", 500, NULL, 2,&HandleLCD );
   }
 
   
@@ -228,7 +228,7 @@ static void vTaskSendToESP8266(void *pvParameters)
   {
     
     DataSend = "";
-    xQueueReceive( xQueueDHT, &DHTValue, xTicksToWait );
+    xQueuePeek( xQueueDHT, &DHTValue, xTicksToWait );
  
   
     
