@@ -1,4 +1,3 @@
-/* FreeRTOS.org includes. */
 #include "Arduino_FreeRTOS.h"
 #include "queue.h"
 #include "DHT.h"
@@ -14,7 +13,7 @@ LiquidCrystal_I2C lcd(0X27,16,2);
 #define DHTPIN 41
 #define LED1   45
 #define LED2   47
-#define PIR    33
+//#define PIR    33
 #define BUZZER 43
 
 /* DHT11 */
@@ -29,8 +28,6 @@ String StateLed1 = "0";
 String StateLed2 = "0";
 
 /* Module Sim */
-int _timeout;
-String _buffer;
 String number = "0978879560"; 
 
 /* The task function. */
@@ -177,9 +174,6 @@ static void vTaskSendToESP8266(void *pvParameters)
     
     DataSend = "";
     xQueuePeek( xQueueDHT, &DHTValue, xTicksToWait );
- 
-  
-    
     DataSend = DataSend + DHTValue.Hum+":"+DHTValue.Temp;
     Serial1.println(DataSend);
 
@@ -196,10 +190,8 @@ static void vTaskLCD(void *pvParameters)
   const TickType_t xTicksToWait = 100/portTICK_PERIOD_MS;
   for(;;)
   {
-//    Serial.println("---LCD---");  
     xQueueReceive(xQueueDHT, &ReceiveDHT, xTicksToWait);
-    
-    
+
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("hum:");
@@ -224,7 +216,6 @@ static void vTaskReceiveFromESP8266(void *pvParameters)
   { 
     if (Serial1.available() >0)
     {
-    
     String str;
 
     str =  Serial1.readStringUntil('\n');
@@ -251,18 +242,16 @@ static void vTaskControl(void *pvParameters)
   
   for(;;)
   {
-//    Serial.println("---Control---");
     xStatus = xQueueReceive( xQueueControl, &queue_control,xTicksToWait );
-    if(xStatus == pdPASS){
-      
-
+    if(xStatus == pdPASS)
+    {
       if (queue_control.Led1 == 1) digitalWrite(LED1, HIGH);
       else digitalWrite(LED1, LOW);
 
       if (queue_control.Led2 == 1) digitalWrite(LED2, HIGH);
       else digitalWrite(LED2, LOW);
             
-      }
+    }
     
     vTaskDelay(300/portTICK_PERIOD_MS );
     taskYIELD();
@@ -274,35 +263,31 @@ static void vTaskWarning(void *pvParameters)
 { 
   BaseType_t xStatus;
   const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
+  int state = 0;
+  String Content;
   for(;;)
-  { 
-    int state = 0;
-    String Content;
-    for(;;)
+  {
+    state = 0;
+    xSemaphoreTake(xCountingSemaphore, portMAX_DELAY );
+    xStatus = xQueueReceive(xIntegerQueue, &state, xTicksToWait);
+    if (xStatus == pdPASS)
     {
-      state = 0;
-      xSemaphoreTake(xCountingSemaphore, portMAX_DELAY );
-      xStatus = xQueueReceive(xIntegerQueue, &state, xTicksToWait);
-      if (xStatus == pdPASS)
+      digitalWrite(BUZZER, HIGH); 
+      CallNumber();
+      SendMessage(state);
+//Serial.println(state);
+      digitalWrite(BUZZER, LOW);
+      if (state == 1)
       {
-        digitalWrite(BUZZER, HIGH); 
-        CallNumber();
-        SendMessage(state);
-  
-        //delay(2000);
-        digitalWrite(BUZZER, LOW);
-        if (state == 1)
-        {
-          attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
-        }
-        if (state == 2)
-        {
-          attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
-        }
-       }
-    }
+        attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
+      }
+      if (state == 2)
+      {
+        attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
+      }
+     }
   }
-}
+ }
 
 static void vPIRInterruptHandler( void )
 {
@@ -359,6 +344,7 @@ static void SendMessage(int x)
   Serial.println(message); //text content
   updateSerial();
   Serial.write(26);
+  delay(2000);
 }
 
 static void CallNumber(void)
