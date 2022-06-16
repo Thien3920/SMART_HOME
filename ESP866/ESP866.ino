@@ -92,5 +92,5 @@ void loop() {
   Serial.println(xdata);
   
     
-  delay(100);
+  delay(1000);
 }
