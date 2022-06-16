@@ -101,8 +101,8 @@ void setup() {
   /* Interrupts */
   pinMode(2, INPUT);
   pinMode(3, INPUT);
-//  attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
-//  attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
+  attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
+  attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
    
   if( xCountingSemaphore != NULL && xIntegerQueue != NULL)
   {
@@ -182,7 +182,6 @@ static void vTaskLCD(void *pvParameters)
   for(;;)
   {
     xQueueReceive(xQueueDHT, &ReceiveDHT, xTicksToWait);
-
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("hum:");
@@ -214,14 +213,14 @@ static void vTaskReceiveFromESP8266(void *pvParameters)
   
     if (str.length() == 6)
     {
-    StateLed1 = str.substring(0,1);
-    StateLed2 = str.substring(2,3);
-    StateWarning = str.substring(4,5);
-    StructControl DataToSend;
-    DataToSend.Led1 = StateLed1.toInt();
-    DataToSend.Led2 = StateLed2.toInt();
-    DataToSend.Warning = StateWarning.toInt();
-    xQueueSendToBack( xQueueControl,&DataToSend, xTicksToWait);
+      StateLed1 = str.substring(0,1);
+      StateLed2 = str.substring(2,3);
+      StateWarning = str.substring(4,5);
+      StructControl DataToSend;
+      DataToSend.Led1 = StateLed1.toInt();
+      DataToSend.Led2 = StateLed2.toInt();
+      DataToSend.Warning = StateWarning.toInt();
+      xQueueSendToBack( xQueueControl,&DataToSend, xTicksToWait);
     }
     }
     vTaskDelay(300/portTICK_PERIOD_MS );
@@ -248,15 +247,11 @@ static void vTaskControl(void *pvParameters)
       else digitalWrite(LED2, LOW);
       if (queue_control.Warning == 1) 
         {
-        FlagWarning = 1;
-        attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
-        attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
+          FlagWarning = 1;
         }
       else 
         {
-        FlagWarning = 0;
-        detachInterrupt(digitalPinToInterrupt(3));
-        detachInterrupt(digitalPinToInterrupt(2));
+          FlagWarning = 0;
         }
     }
     vTaskDelay(300/portTICK_PERIOD_MS );
@@ -279,38 +274,27 @@ static void vTaskWarning(void *pvParameters)
     state = 0;
     xSemaphoreTake(xCountingSemaphore, portMAX_DELAY);;
     xStatus = xQueueReceive(xIntegerQueue, &state, xTicksToWait);
-    if (xStatus == pdPASS)
+    if (xStatus == pdPASS && FlagWarning==1)
     {
       if (state == 1 || state==2)
       {
-      digitalWrite(BUZZER, HIGH); 
-      if ((timeNow -timeLATE )> 50000)
-      {
-         timeLATE = timeNow;
-
-      CallNumber();
-      
+        digitalWrite(BUZZER, HIGH); 
+        if ((timeNow -timeLATE )> 50000)
+        {
+          timeLATE = timeNow;
+          CallNumber();
+        }
+        delay(2000);
+        SendMessage(state);
+        vTaskDelay(10000/portTICK_PERIOD_MS );
+        digitalWrite(BUZZER, LOW);
       }
-      delay(2000);
-     SendMessage(state);
-      vTaskDelay(10000/portTICK_PERIOD_MS );
-      digitalWrite(BUZZER, LOW);
-      if (state == 1 && FlagWarning==1)
-      {
-        attachInterrupt(digitalPinToInterrupt(3), vPIRInterruptHandler, RISING);
-      }
-      if (state == 2 && FlagWarning ==1)
-      {
-        attachInterrupt(digitalPinToInterrupt(2), vMQ2InterruptHandler, FALLING);
-      }
-     }
     }
   }
- }
+}
 
 static void vPIRInterruptHandler( void )
 {
-  detachInterrupt(digitalPinToInterrupt(3));
   volatile int state1 = 1;
   static BaseType_t xHigherPriorityTaskWoken;
   xHigherPriorityTaskWoken = pdFALSE;
@@ -324,14 +308,9 @@ static void vPIRInterruptHandler( void )
 
 static void vMQ2InterruptHandler( void )
 {
-//      Serial.println("MQ2");
-
-  detachInterrupt(digitalPinToInterrupt(2));
   volatile int state2 = 2;
   static BaseType_t xHigherPriorityTaskWoken;
-
   xHigherPriorityTaskWoken = pdFALSE;
-
   xSemaphoreGiveFromISR( xCountingSemaphore, (BaseType_t*)&xHigherPriorityTaskWoken );
   xQueueSendToBackFromISR( xIntegerQueue, &state2, (BaseType_t*)&xHigherPriorityTaskWoken);
   if( xHigherPriorityTaskWoken == pdTRUE )
@@ -365,8 +344,7 @@ static void SendMessage(int x)
     Serial.println(message); //text content
     updateSerial();
     Serial.write(26);
-  
-//  delay(2000);
+    delay(2000);
 }
 
 static void CallNumber(void)
@@ -382,7 +360,6 @@ static void CallNumber(void)
 static void updateSerial(void)
 {
   delay(500);
-
   while(Serial.available()) 
   {
     Serial.write(Serial.read());//Forward what Software Serial received to Serial Port
