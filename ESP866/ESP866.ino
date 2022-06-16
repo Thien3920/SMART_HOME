@@ -1,12 +1,12 @@
+
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 
 WiFiClient client;
 char auth[] = "LnhaetDzOIH5e2AdEUo4_euVC8k318CF"; 
-const char *ssid =  "B-LINK_29F5";     // replace with your wifi ssid and wpa2 key
-const char *pass =  "Thien3920";
-
-int state_led0,state_led1;
+const char *ssid =  "Wifi Free";     
+const char *pass =  "087654321";
+int state_led0,state_led1, statewarning;
 String xdata ;
 
 void setup() {
@@ -44,6 +44,20 @@ BLYNK_WRITE(V1)
    }
 }
 
+BLYNK_WRITE(V2)                     //  ham nay duoc goi den khi Widget Vo thay doi trang thai
+{
+   int pinValue2 = param.asInt();       // gan gia tri cua chan V0 cho bien pinValue
+   
+   if (pinValue2 == 1) {
+   statewarning=1;        
+   }
+   
+   else {
+   statewarning=0;        
+   }
+}
+
+
 
 void GetDataFromArduino()
 {
@@ -66,10 +80,7 @@ void GetDataFromArduino()
   } 
 }
 
-void SendDataToArduino(String data)
-{
-  Serial.println(data);
-}
+
 
 void loop() {
 
@@ -77,8 +88,9 @@ void loop() {
   GetDataFromArduino();
 
   xdata ="";
-  xdata=xdata+state_led0+":"+state_led1;
-  SendDataToArduino(xdata); 
+  xdata=xdata+state_led0+":"+state_led1+":"+statewarning;
+  Serial.println(xdata);
+  
     
-  delay(1000);
+  delay(100);
 }
